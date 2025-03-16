@@ -1,41 +1,47 @@
 cmake_minimum_required(VERSION 3.13.1)
 
+# Set project name
+project(example-standalone-inferencing-zephyr)
+
+# Ensure correct C++ standard
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Find Zephyr SDK
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
-project(example-standalone-inferencing-zephyr)
-
-include(utils/cmake/utils.cmake)
-
-# Needed for colorful output
+# Enable colored output for debugging
 zephyr_compile_options(-fdiagnostics-color=always)
 
-# Use hardware acceleration for DSP and Neural Network code
-# You'll need to disable these on non-Arm cores
-add_definitions(-DEI_CLASSIFIER_TFLITE_ENABLE_CMSIS_NN=1
-                -DARM_MATH_LOOPUNROLL
-                )
+# Enable hardware acceleration for DSP and ML inference
+add_definitions(
+    -DEI_CLASSIFIER_TFLITE_ENABLE_CMSIS_NN=1
+    -DARM_MATH_LOOPUNROLL
+)
 
-# If using Nordic boards, add the following definition
-# -DEI_NORDIC
-
-# Add the Edge Impulse SDK
-add_subdirectory(edge-impulse-sdk/cmake/zephyr)
-
-# Edge impulse SDK include directories
-set(INCLUDES
-    .
+# Define source directories
+set(SOURCE_DIRS
     src
     tflite-model
     model-parameters
-    )
-include_directories(${INCLUDES})
+)
 
-RECURSIVE_FIND_FILE(MODEL_FILES "tflite-model" "*.cpp")
-list(APPEND SOURCE_FILES ${MODEL_FILES})
+# Add include directories
+include_directories(${SOURCE_DIRS})
 
-# add all sources to the project
+# Add Edge Impulse SDK (Ensure correct path)
+add_subdirectory(edge-impulse-sdk)
+
+# Collect all .cpp source files in tflite-model directory
+file(GLOB_RECURSE MODEL_FILES "tflite-model/*.cpp")
+
+# Define the list of source files
+set(SOURCE_FILES
+    ${MODEL_FILES}
+    src/main.cpp
+    src/adbms_main.cpp
+    src/adBms_Application.cpp
+)
+
+# Add sources to the Zephyr application
 target_sources(app PRIVATE ${SOURCE_FILES})
-target_sources(app PRIVATE src/main.cpp)

@@ -1,80 +1,50 @@
-// Zephyr 3.1.x and newer uses different include scheme
-#include <version.h>
-#if (KERNEL_VERSION_MAJOR > 3) || ((KERNEL_VERSION_MAJOR == 3) && (KERNEL_VERSION_MINOR >= 1))
+/*******************************************************************************
+Copyright (c) 2020 - Analog Devices Inc. All Rights Reserved.
+This software is proprietary & confidential to Analog Devices, Inc.
+and its licensor.
+------------------------------------------------------------------------------*/
+
+/* Includes ------------------------------------------------------------------*/
 #include <zephyr/kernel.h>
-#else
-#include <zephyr.h>
-#endif
-#include "edge-impulse-sdk/classifier/ei_run_classifier.h"
-#include "edge-impulse-sdk/dsp/numpy.hpp"
-#ifdef EI_NORDIC
-#include <nrfx_clock.h>
-#endif
+#include <zephyr/device.h>
+#include <zephyr/drivers/spi.h>
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/sys/printk.h>
+#include "adbms_main.h"
+#include "common.h"
 
-static const float features[] = {
-    // copy raw features here (for example from the 'Live classification' page)
-    // see https://docs.edgeimpulse.com/docs/running-your-impulse-locally-zephyr
-};
+/* SPI Configuration */
+#define SPI_NODE DT_NODELABEL(spi1)
+#define CS_GPIO_NODE DT_ALIAS(cs)
 
-int raw_feature_get_data(size_t offset, size_t length, float *out_ptr) {
-    memcpy(out_ptr, features + offset, length * sizeof(float));
+static const struct device *spi_dev = DEVICE_DT_GET(SPI_NODE);
+static const struct gpio_dt_spec chip_select = GPIO_DT_SPEC_GET_OR(CS_GPIO_NODE, gpios, {0});
+
+void spi_init(void);
+
+int main(void) {
+    k_sleep(K_MSEC(1000));
+    printk("Initialization Check.\n");
+    k_sleep(K_MSEC(1000));
+
+    spi_init();
+    adbms_main();
     return 0;
 }
 
-int main() {
-    // This is needed so that output of printf is output immediately without buffering
-    setvbuf(stdout, NULL, _IONBF, 0);
-
-#ifdef CONFIG_SOC_NRF5340_CPUAPP // this comes from Zephyr
-    // Switch CPU core clock to 128 MHz
-    nrfx_clock_divider_set(NRF_CLOCK_DOMAIN_HFCLK, NRF_CLOCK_HFCLK_DIV_1);
-#endif
-
-    printk("Edge Impulse standalone inferencing (Zephyr)\n");
-
-    if (sizeof(features) / sizeof(float) != EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE) {
-        printk("The size of your 'features' array is not correct. Expected %d items, but had %u\n",
-            EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE, sizeof(features) / sizeof(float));
-        return 1;
+void spi_init() {
+    if (!device_is_ready(spi_dev)) {
+        printk("SPI device not found!\n");
+        return;
     }
 
-    ei_impulse_result_t result = { 0 };
-
-    while (1) {
-        // the features are stored into flash, and we don't want to load everything into RAM
-        signal_t features_signal;
-        features_signal.total_length = sizeof(features) / sizeof(features[0]);
-        features_signal.get_data = &raw_feature_get_data;
-
-        // invoke the impulse
-        EI_IMPULSE_ERROR res = run_classifier(&features_signal, &result, false);
-        printk("run_classifier returned: %d\n", res);
-
-        if (res != 0) return 1;
-
-        printk("Predictions (DSP: %d ms., Classification: %d ms., Anomaly: %d ms.): \n",
-                result.timing.dsp, result.timing.classification, result.timing.anomaly);
-#if EI_CLASSIFIER_OBJECT_DETECTION == 1
-        bool bb_found = result.bounding_boxes[0].value > 0;
-        for (size_t ix = 0; ix < result.bounding_boxes_count; ix++) {
-            auto bb = result.bounding_boxes[ix];
-            if (bb.value == 0) {
-                continue;
-            }
-            printk("    %s (%f) [ x: %u, y: %u, width: %u, height: %u ]\n", bb.label, bb.value, bb.x, bb.y, bb.width, bb.height);
-        }
-        if (!bb_found) {
-            printk("    No objects found\n");
-        }
-#else
-        for (size_t ix = 0; ix < EI_CLASSIFIER_LABEL_COUNT; ix++) {
-            printk("    %s: %.5f\n", result.classification[ix].label,
-                                    result.classification[ix].value);
-        }
-#if EI_CLASSIFIER_HAS_ANOMALY == 1
-        printk("    anomaly score: %.3f\n", result.anomaly);
-#endif
-#endif
-        k_msleep(2000);
+    if (chip_select.port && device_is_ready(chip_select.port)) {
+        gpio_pin_configure_dt(&chip_select, GPIO_OUTPUT_ACTIVE);
+        gpio_pin_set_dt(&chip_select, 1);
+    } else {
+        printk("Chip select GPIO not found or not ready!\n");
     }
+
+    printk("SPI initialized.\n");
 }
+
